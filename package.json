@@ -3,8 +3,13 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev": "bun run scripts/run.ts",
+    "clear": "bun run scripts/clear.ts"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@vercel/node": "^5.8.2"
   },
   "peerDependencies": {
     "typescript": "^5"
