@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Article } from "./fetcher";
 
 const llm = new ChatGoogleGenerativeAI({
-  model: "gemini-3.1-flash-lite",
+  model: "gemma-4-31b-it",
   temperature: 0,
   apiKey: process.env.GEMINI_API_KEY,
 });
