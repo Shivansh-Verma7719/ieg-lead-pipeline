@@ -34,6 +34,8 @@ export const extractedDataSchema = z.object({
 
 export type ExtractedData = z.infer<typeof extractedDataSchema>;
 
+const structuredLlm = llm.withStructuredOutput(extractedDataSchema);
+
 export async function extractFundingDetails(
   article: Article,
 ): Promise<ExtractedData | null> {
@@ -43,20 +45,13 @@ export async function extractFundingDetails(
     Content Snippet: ${article.content}
   `;
 
-  // Helper: try to extract JSON object from model text, tolerant of stray/backtick fences
   function extractJsonText(text: string) {
-    if (!text) return null;
-    // Remove lone backticks and code fences
-    let t = text.replace(/```/g, "").replace(/`/g, "");
-    // If the model wrapped output in a code block like ```json ... ``` this will remove them.
-    // Try to locate the first { and last } to extract a JSON object
-    const first = t.indexOf("{");
-    const last = t.lastIndexOf("}");
-    if (first !== -1 && last !== -1 && last > first) {
-      return t.slice(first, last + 1);
-    }
-    // Fallback: return trimmed text
-    return t.trim();
+    const trimmedText = text.trim();
+    return (
+      trimmedText.match(/^```(?:json)?\s*([\s\S]*?)```/)?.[1] ||
+      trimmedText.match(/```json\s*([\s\S]*?)```/)?.[1] ||
+      trimmedText.replace(/```/g, "").replace(/`/g, "").trim()
+    );
   }
 
   try {
@@ -69,42 +64,33 @@ export async function extractFundingDetails(
       ${contentToAnalyze}
     `;
 
-    const aiMsg = await llm.invoke(prompt);
-    const raw = (aiMsg as any).content ?? String(aiMsg);
+    const result = await structuredLlm.invoke(prompt);
 
-    const jsonText = extractJsonText(raw as string);
-    if (!jsonText) {
-      console.error(
-        `Unable to extract JSON from LLM response for article: ${article.title}`,
-      );
+    if (!result.isIndianFunding) {
       return null;
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch (e) {
-      console.error(
-        `JSON.parse failed on extracted text for article: ${article.title}`,
-        jsonText,
-        e,
-      );
-      return null;
-    }
-
-    const fit = extractedDataSchema.safeParse(parsed);
-    if (!fit.success) {
-      console.error(
-        `Zod schema validation failed for article: ${article.title}`,
-        fit.error,
-      );
-      return null;
-    }
-
-    if (!fit.data.isIndianFunding) return null;
-
-    return fit.data;
+    return result;
   } catch (error) {
+    // Minimal fallback for rare parser failures caused by fence formatting.
+    try {
+      const fallback = await llm.invoke(`
+        Return ONLY valid JSON object. Do not use markdown code fences.
+        Keys required: isIndianFunding, companyName, roundStage, amountRaised, leadInvestor, otherInvestors, sector, country, summary.
+
+        Article Text:
+        ${contentToAnalyze}
+      `);
+
+      const raw = String((fallback as any).content ?? "");
+      const jsonText = extractJsonText(raw);
+      const parsed = extractedDataSchema.safeParse(JSON.parse(jsonText));
+      if (!parsed.success || !parsed.data.isIndianFunding) return null;
+      return parsed.data;
+    } catch {
+      // Keep original logging path below.
+    }
+
     console.error(`Error extracting data for article: ${article.title}`, error);
     return null;
   }
